@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>FLIP - Mobile Test</title>
+<style>
+  :root { --bg: #0a0c14; --gold: #ffd07a; --p1: #6cb8ff; --p2: #ff89b3; }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { font-family: sans-serif; background: var(--bg); color: #fff; overflow: hidden; }
+  .app { width: 100%; max-width: 480px; margin: auto; padding: 20px; height: 100vh; display: flex; flex-direction: column; }
+  .panel { background: rgba(255,255,255,0.05); border-radius: 15px; padding: 15px; margin-bottom: 15px; border: 1px solid rgba(255,255,255,0.1); text-align: center; }
+  .score { font-size: 28px; font-weight: 900; display: flex; justify-content: space-around; }
+  .card-row { display: flex; gap: 10px; justify-content: center; margin-top: 10px; }
+  .card-box { width: 85px; height: 115px; border-radius: 10px; border: 2px solid rgba(255,255,255,0.2); display: flex; flex-direction: column; align-items: center; justify-content: center; background: #222; position: relative; }
+  .v-num { position: absolute; top: 5px; left: 8px; font-weight: bold; font-size: 18px; }
+  .v-0 { background: #4a2b3d; color: #ff9edb; } .v-1 { background: #5c1a20; color: #ff8c96; }
+  .v-2 { background: #1a2a44; color: #8cbaff; } .v-3 { background: #1e4d6b; color: #8cd6ff; }
+  .v-4 { background: #351a4f; color: #c58cff; } .v-K { background: #111; color: var(--gold); border-color: var(--gold); }
+  .battle-stage { display: flex; justify-content: center; align-items: center; gap: 15px; margin: 30px 0; perspective: 1000px; }
+  .flip-card { width: 100px; height: 140px; position: relative; transition: transform 0.6s; transform-style: preserve-3d; }
+  .flip-card.is-flipped { transform: rotateY(180deg); }
+  .flip-front, .flip-back { position: absolute; width: 100%; height: 100%; backface-visibility: hidden; border-radius: 12px; border: 2px solid #fff; display: flex; align-items: center; justify-content: center; font-size: 32px; font-weight: bold; }
+  .flip-back { transform: rotateY(180deg); }
+  button { width: 100%; padding: 18px; border-radius: 12px; border: none; font-weight: bold; font-size: 16px; margin-top: 10px; cursor: pointer; }
+  .btn-main { background: linear-gradient(135deg, #c08fff, #ff8aa9); color: #fff; }
+  .btn-sub { background: #333; color: #fff; border: 1px solid #555; }
+  .hidden { display: none !important; }
+  .overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 100; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+</style>
+</head>
+<body>
+<div id="overlay" class="overlay hidden">
+  <h2 id="overlay-msg" style="margin-bottom:20px; text-align:center; padding:0 20px;"></h2>
+  <button class="btn-main" style="width:200px" onclick="hideOverlay()">受け取った</button>
+</div>
+<div class="app">
+  <div class="panel">
+    <div class="score">
+      <div><span id="s1">0</span><div style="font-size:10px;color:var(--p1)">P1</div></div>
+      <div id="rd-txt" style="font-size:14px;color:var(--gold)">ROUND 1</div>
+      <div><span id="s2">0</span><div style="font-size:10px;color:var(--p2)">P2</div></div>
+    </div>
+  </div>
+  <div id="view-select">
+    <p id="guide" style="text-align:center; color:var(--gold); margin-bottom:15px; font-weight:bold;"></p>
+    <div id="hand"></div>
+  </div>
+  <div id="view-battle" class="hidden">
+    <div class="battle-stage">
+      <div id="c1" class="flip-card"></div>
+      <div style="font-weight:bold; color:var(--gold)">VS</div>
+      <div id="c2" class="flip-card"></div>
+    </div>
+    <p id="b-msg" style="text-align:center; margin-bottom:15px; font-weight:bold;"></p>
+    <div id="flip-ctrl" class="hidden">
+      <div style="display:flex; gap:10px;">
+        <button class="btn-sub" onclick="doFlip(false)">そのまま</button>
+        <button class="btn-main" id="f-btn" onclick="doFlip(true)">リバース</button>
+      </div>
+    </div>
+    <button id="next-btn" class="btn-main hidden" onclick="nextRound()">次へ</button>
+  </div>
+</div>
+<script>
+  const MASTER = [
+    {id:'c1',s1:1,n1:'兵',s2:0,n2:'堕天'}, {id:'c2',s1:1,n1:'兵',s2:10,n2:'王'},
+    {id:'c3',s1:2,n1:'戦',s2:2,n2:'戦'}, {id:'c4',s1:0,n1:'堕天',s2:10,n2:'王'},
+    {id:'c5',s1:3,n1:'巫',s2:4,n2:'嵐'}
+  ];
+  let st = { rd:1, sc:[0,0], tk:[1,1], hands:[[],[]], sel:[null,null], phase:'p1_sel', cur:0 };
+  function init() {
+    st.hands = [MASTER.map(c=>({...c, u:false})), MASTER.map(c=>({...c, u:false}))];
+    document.getElementById('guide').textContent = "P1: 出すカードを選択";
+    render();
+  }
+  function render() {
+    const h = document.getElementById('hand'); h.innerHTML = '';
+    st.hands[st.cur].forEach(c => {
+      if(c.u) return;
+      const row = document.createElement('div'); row.className = 'card-row';
+      row.appendChild(createC(c.s1, c.n1, () => select(c.id, c.s1)));
+      row.appendChild(createC(c.s2, c.n2, () => select(c.id, c.s2)));
+      h.appendChild(row);
+    });
+  }
+  function createC(v,n,cb) {
+    const d = document.createElement('div'); const vK = v===10?'K':v;
+    d.className = `card-box v-${vK}`;
+    d.innerHTML = `<span class="v-num">${vK}</span><span>${n}</span>`;
+    d.onclick = cb; return d;
+  }
+  function select(id, val) {
+    st.sel[st.cur] = {id, val};
+    st.hands[st.cur].find(x=>x.id===id).u = true;
+    if(st.cur === 0) {
+      st.cur = 1;
+      showOverlay("P2にスマホを渡してください");
+    } else {
+      startBattle();
+    }
+  }
+  function showOverlay(m) {
+    document.getElementById('overlay-msg').textContent = m;
+    document.getElementById('overlay').classList.remove('hidden');
+  }
+  function hideOverlay() {
+    document.getElementById('overlay').classList.add('hidden');
+    if(st.phase === 'p1_sel') {
+      document.getElementById('guide').textContent = "P2: 出すカードを選択";
+      render();
+    }
+  }
+  function startBattle() {
+    st.phase = 'p1_flip'; st.cur = 0;
+    document.getElementById('view-select').classList.add('hidden');
+    document.getElementById('view-battle').classList.remove('hidden');
+    [0,1].forEach(i => {
+      const s = st.sel[i], m = MASTER.find(x=>x.id===s.id);
+      const v2 = (m.s1===s.val)?m.s2:m.s1;
+      document.getElementById(`c${i+1}`).innerHTML = `<div class="flip-front v-${s.val===10?'K':s.val}">${s.val===10?'K':s.val}</div><div class="flip-back v-${v2===10?'K':v2}">${v2===10?'K':v2}</div>`;
+      document.getElementById(`c${i+1}`).classList.remove('is-flipped');
+    });
+    if(st.sel[0].val===4 && st.sel[1].val!==2) document.getElementById('c2').classList.add('is-flipped');
+    if(st.sel[1].val===4 && st.sel[0].val!==2) document.getElementById('c1').classList.add('is-flipped');
+    updateBattleUI();
+  }
+  function updateBattleUI() {
+    const p = st.cur === 0 ? "P1" : "P2";
+    document.getElementById('b-msg').textContent = `${p}の番: リバースしますか？`;
+    document.getElementById('flip-ctrl').classList.remove('hidden');
+    document.getElementById('f-btn').disabled = st.tk[st.cur] === 0;
+  }
+  function doFlip(want) {
+    if(want) { st.tk[st.cur] = 0; document.getElementById(`c${st.cur+1}`).classList.add('is-flipped'); }
+    if(st.phase === 'p1_flip') {
+      st.phase = 'p2_flip'; st.cur = 1;
+      document.getElementById('flip-ctrl').classList.add('hidden');
+      setTimeout(() => showOverlay("P2にスマホを渡してください"), 400);
+      updateBattleUI();
+    } else {
+      resolve();
+    }
+  }
+  function resolve() {
+    document.getElementById('flip-ctrl').classList.add('hidden');
+    let final = [0,0];
+    [0,1].forEach(i => {
+      const s = st.sel[i], m = MASTER.find(x=>x.id===s.id);
+      final[i] = document.getElementById(`c${i+1}`).classList.contains('is-flipped') ? (m.s1===s.val?m.s2:m.s1) : s.val;
+    });
+    let w = -1;
+    if(final[0]===0 && final[1]===10) w=0; else if(final[1]===0 && final[0]===10) w=1;
+    else if(final[0]>final[1]) w=0; else if(final[1]>final[0]) w=1;
+    if(w!==-1) st.sc[w]++;
+    document.getElementById('s1').textContent = st.sc[0];
+    document.getElementById('s2').textContent = st.sc[1];
+    document.getElementById('b-msg').textContent = w===-1 ? "引き分け" : `P${w+1}の勝利！`;
+    document.getElementById('next-btn').classList.remove('hidden');
+  }
+  function nextRound() {
+    if(st.rd >= 3) { alert("ゲーム終了！最終スコア P1:"+st.sc[0]+" P2:"+st.sc[1]); location.reload(); return; }
+    st.rd++; st.cur = 0; st.phase = 'p1_sel'; st.sel = [null,null];
+    document.getElementById('rd-txt').textContent = `ROUND ${st.rd}`;
+    document.getElementById('view-select').classList.remove('hidden');
+    document.getElementById('view-battle').classList.add('hidden');
+    document.getElementById('next-btn').classList.add('hidden');
+    document.getElementById('guide').textContent = "P1: 出すカードを選択";
+    render();
+  }
+  init();
+</script>
+</body>
+</html>
